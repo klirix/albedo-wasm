@@ -23,7 +23,8 @@
     "build": "tsc && cp src/albedo.wasm dist/",
     "build:inline": "tsc && node scripts/inline-wasm.js",
     "test": "bun test",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postinstall": "bun run build"
   },
   "devDependencies": {
     "@types/bun": "latest",
