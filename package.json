@@ -1,12 +1,11 @@
 {
   "name": "albedo-wasm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WASM bindings for Albedo document store",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  
   "typesVersions": {
     "*": {
       "*": [

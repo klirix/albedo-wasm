@@ -20,8 +20,8 @@ async function loadWasmBytes(url: URL | string): Promise<ArrayBuffer> {
   const buffer = await fs.readFile(url);
   return buffer.buffer.slice(
     buffer.byteOffset,
-    buffer.byteOffset + buffer.byteLength
-  );
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
 }
 
 function isBrowserEnvironment(): boolean {
@@ -33,7 +33,7 @@ type EnvImports = NodeEnvImports | BrowserEnvImports;
 
 async function resolveEnvImports(helpers: EnvHelpers): Promise<EnvImports> {
   console.log(
-    isBrowserEnvironment() ? "Browser environment" : "Node.js environment"
+    isBrowserEnvironment() ? "Browser environment" : "Node.js environment",
   );
   if (isBrowserEnvironment()) {
     return import("./browser-imports").then(({ createBrowserEnvImports }) => {
@@ -60,25 +60,25 @@ type WasmExports = WebAssembly.Exports & {
   albedo_ensure_index: (
     bucketHandle: number,
     pathPtr: number,
-    optionsByte: number
+    optionsByte: number,
   ) => number;
   albedo_drop_index: (bucketHandle: number, pathPtr: number) => number;
   albedo_delete: (
     bucketHandle: number,
     queryPtr: number,
-    queryLen: number
+    queryLen: number,
   ) => number;
   albedo_list: (
     bucketHandle: number,
     queryPtr: number,
-    outIterPtr: number
+    outIterPtr: number,
   ) => number;
   albedo_data: (iterHandle: number, outDocPtr: number) => number;
   albedo_close_iterator: (iterHandle: number) => number;
   albedo_transform: (
     bucketHandle: number,
     queryPtr: number,
-    outIterPtr: number
+    outIterPtr: number,
   ) => number;
   albedo_transform_data: (iterHandle: number, outDocPtr: number) => number;
   albedo_transform_apply: (iterHandle: number, transformPtr: number) => number;
@@ -137,7 +137,7 @@ function writeBytes(ptr: number, bytes: Uint8Array): boolean {
 function writeHandleStruct(
   outPtr: number,
   handlePtr: number,
-  handleLen: number
+  handleLen: number,
 ): boolean {
   const buffer = getMemoryBuffer();
   if (!buffer) return false;
@@ -220,7 +220,7 @@ const envHelpers: EnvHelpers = {
 const envImports = await resolveEnvImports(envHelpers);
 
 export async function compileWasmModule(
-  url?: string | URL
+  url?: string | URL,
 ): Promise<WebAssembly.Module> {
   url = url || wasmUrl;
   if (
@@ -311,7 +311,7 @@ export class Bucket {
       dataBuf instanceof Uint8Array ? dataBuf : new Uint8Array(dataBuf);
     const dataPtr = this.exports.albedo_malloc(dataBytes.length);
     new Uint8Array(this.exports.memory.buffer, dataPtr, dataBytes.length).set(
-      dataBytes
+      dataBytes,
     );
     try {
       const result = this.exports.albedo_insert(this.pointer, dataPtr);
@@ -378,7 +378,7 @@ export class Bucket {
       const res = exports.albedo_ensure_index(
         this.pointer,
         pathAlloc.ptr,
-        optionFlags
+        optionFlags,
       );
       if (res !== ResultCode.OK) {
         throw new Error("Failed to create index in Albedo database");
@@ -434,7 +434,7 @@ export class Bucket {
       sort?: Query["sort"];
       sector?: Query["sector"];
       projection?: Query["projection"];
-    } = {}
+    } = {},
   ): Generator<any, void, boolean | undefined> {
     const exports = this.exports;
     const finalQuery: Query = { query };
@@ -481,7 +481,7 @@ export class Bucket {
         }
         const docLen = this.memory.getInt32(docPtr, true);
         const shouldQuit = yield deserialize(
-          new Uint8Array(this.memory.buffer, docPtr, docLen)
+          new Uint8Array(this.memory.buffer, docPtr, docLen),
         );
         if (shouldQuit) {
           break;
@@ -510,7 +510,7 @@ export class Bucket {
   }
 
   *transformCursor(
-    query: Query["query"] = {}
+    query: Query["query"] = {},
   ): Generator<any, void, any | null | undefined> {
     const exports = this.exports;
     const finalQuery: Query = { query };
@@ -555,7 +555,7 @@ export class Bucket {
         }
         const docLen = this.memory.getInt32(docPtr, true);
         const currentDoc = deserialize(
-          new Uint8Array(this.memory.buffer, docPtr, docLen)
+          new Uint8Array(this.memory.buffer, docPtr, docLen),
         );
 
         // Yield the document and get the transformation from the user
@@ -581,7 +581,7 @@ export class Bucket {
           transformLen = transformBytes.length;
           transformPtr = exports.albedo_malloc(transformLen);
           new Uint8Array(this.memory.buffer, transformPtr, transformLen).set(
-            transformBytes
+            transformBytes,
           );
         }
 
@@ -589,7 +589,7 @@ export class Bucket {
         try {
           const applyRes = exports.albedo_transform_apply(
             iterHandle,
-            transformPtr
+            transformPtr,
           );
           if (applyRes !== ResultCode.OK) {
             throw new Error("Failed to apply transformation");
@@ -611,7 +611,7 @@ export class Bucket {
 
   transform(
     query: Query["query"] = {},
-    mutator: (doc: any) => any | null | undefined
+    mutator: (doc: any) => any | null | undefined,
   ) {
     const cursor = this.transformCursor(query);
     let doc = cursor.next().value;
