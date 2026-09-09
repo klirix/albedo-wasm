@@ -113,12 +113,19 @@ The module uses top-level `await`, so make sure your bundler targets environment
 Albedo reuses familiar document-store concepts:
 
 ```ts
-type Query = {
-  query?: Record<string, Filter>;
+type QueryObject = {
+  query?: QueryClause;
   sort?: { asc: string } | { desc: string };
   sector?: { offset?: number; limit?: number };
-  // Projection is not working atm
-  // projection?: { pick?: string[] } | { omit?: string[] };
+  projection?: { pick?: string[] } | { omit?: string[] };
+  cursor?: Record<string, unknown>;
+};
+
+type QueryClause = {
+  $or?: QueryClause[];
+  $and?: QueryClause[];
+  $nor?: QueryClause[];
+  [field: string]: Filter | QueryClause[] | undefined;
 };
 
 type Filter =
@@ -137,6 +144,34 @@ type Filter =
   | { $notExists: any };
 ```
 
+Logical groups can be mixed with field filters:
+
+```ts
+bucket.all({
+  query: {
+    $or: [{ role: "admin" }, { public: true }],
+    deleted: false,
+  },
+});
+```
+
+The fluent `Query` builder and `where()` helper produce the same documents:
+
+```ts
+import { Bucket, Query, where } from "albedo-wasm";
+
+const visible = Query.or(
+  where("role", "admin"),
+  Query.and(where("role", "user"), where("verified", true)),
+).nor(where("deleted", true));
+
+for (const doc of bucket.list(visible)) {
+  console.log(doc);
+}
+```
+
+`list`, `all`, `get`, `delete`, and `transform` still accept a flat filter map (`{ status: "open" }`) for compatibility.
+
 Use dotted paths (`"meta.created_at"`) for nested fields and call `bucket.ensureIndex(path, options)` before running heavy queries. Index options:
 
 ```ts
@@ -149,16 +184,37 @@ bucket.ensureIndex("meta.slug", {
 
 ## API highlights
 
-- `Bucket.open(path)` → opens (or creates) a bucket file. Call `bucket.close()` when shutting down.
-- `bucket.insert(doc)` → inserts any BSON-serializable document.
-- `bucket.ensureIndex(path, options)` / `bucket.dropIndex(path)` → manage indexes.
+- `Bucket.open(path, options?)` → opens (or creates) a bucket file. Call `bucket.close()` when shutting down.
+- `bucket.insert(doc)` → inserts any BSON-serializable document or pre-serialized `Uint8Array`.
+- `bucket.ensureIndex(path, options)` / `bucket.dropIndex(path)` / `bucket.indexes` → manage indexes.
 - `bucket.list(query?, options?)` → generator that yields matching documents; integrate with `for...of`, `Array.from`, or break early by returning `true` from the iterator.
 - `bucket.all(query?, options?)` → convenience wrapper that collects `list`.
-- `bucket.get(query, options?)` → returns the first matching document or `null`.
+- `bucket.get(query, options?)` / `bucket.one(query, options?)` → returns the first matching document or `null`.
 - `bucket.delete(query)` → removes matching documents.
 - `bucket.transform(query, mutator)` → streaming mutate/replace/delete. Return a new document to replace, `null` to delete, or `undefined` to leave the doc untouched.
-- `bucket.vacuum()` → compacts the file.
-- `Bucket.defaultIndexOptions` and `Bucket.version()` are also exported for advanced tooling.
+- `bucket.transfigurate(query, program)` → applies a native update program (`$set`, `$unset`, `$plus`, `$concat`, `$$now`, pipelines) and returns the match count.
+- `bucket.tx(fn)` / `bucket.beginTransaction()` → groups inserts, deletes, transforms, and transfigurate calls under commit/rollback.
+- `bucket.checkpoint()` / `bucket.flush()` / `bucket.vacuum()` → maintenance. WAL is currently forced off for the WASM target, so checkpoint/flush are no-ops besides the C ABI call.
+- `Query`, `where()`, `Bucket.defaultIndexOptions`, and `version()` are also exported.
+
+### Native update programs
+
+```ts
+bucket.transfigurate(where("name", "stark"), {
+  $set: {
+    age: { $plus: ["$.age", 1] },
+    seenAt: "$$now",
+  },
+  $unset: "marriage",
+});
+
+bucket.transfigurate(undefined, [
+  { $set: { fullName: { $concat: ["$.first", " ", "$.last"] } } },
+  { $unset: ["first", "last"] },
+]);
+```
+
+Subscriptions and WAL replication exist in the Albedo C ABI, but WAL mode is currently disabled for `wasm32-freestanding`, so those APIs are not useful in this package yet.
 
 TypeScript declarations live in `dist/index.d.ts`, so editors receive full completions automatically.
 
@@ -169,6 +225,9 @@ Bun is required for dev
 ```bash
 # Install JS dependencies
 bun install
+
+# Rebuild albedo.wasm from the submodule (Zig 0.16 required)
+bun run build-core
 
 # Build the standard JS + WASM pair
 bun run build

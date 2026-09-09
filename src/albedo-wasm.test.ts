@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { Bucket } from "./albedo-wasm";
+import { Bucket, Query, where } from "./albedo-wasm";
 import { after, before } from "node:test";
 import { serialize } from "./bson";
 
@@ -18,7 +18,7 @@ describe("Albedo WASM", () => {
       bucket.close();
       const file = Bun.file("test-bucket.albedo");
       expect(await file.exists()).toBe(true);
-      file.delete();
+      await file.delete();
     });
   });
 
@@ -37,7 +37,7 @@ describe("Albedo WASM", () => {
       expect(allItems.find((item) => item.name === "Alice")?.age).toBe(35);
       expect(allItems.find((item) => item.name === "Bob")?.age).toBe(30);
       bucket.close();
-      Bun.file("test-bucket.albedo").delete();
+      await Bun.file("test-bucket.albedo").delete();
     });
 
     test("should handle all cases in transform", () => {
@@ -228,7 +228,191 @@ describe("Albedo WASM", () => {
       expect(bob?.userId).toBe(2);
     });
 
-    after(() => {
+    after(async () => {
+      bucket.close();
+      await Bun.file("bucket-get-test.albedo").delete();
+    });
+  });
+
+  describe("query expressions", () => {
+    test("supports $or, $and, and $nor", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice", role: "admin", deleted: false, verified: true });
+      bucket.insert({ name: "Bob", role: "user", deleted: false, verified: true });
+      bucket.insert({ name: "Carol", role: "user", deleted: true, verified: true });
+      bucket.insert({ name: "Dave", role: "guest", deleted: false, verified: false });
+
+      const results = bucket.all({
+        query: {
+          $or: [
+            { role: "admin" },
+            { $and: [{ verified: true }, { role: "user" }] },
+          ],
+          $nor: [{ deleted: true }],
+        },
+      }) as Array<{ name: string }>;
+
+      expect(results.map((doc) => doc.name)).toEqual(["Alice", "Bob"]);
+      bucket.close();
+    });
+
+    test("Query builder composes logical clauses", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice", role: "admin", deleted: false, verified: true });
+      bucket.insert({ name: "Bob", role: "user", deleted: false, verified: true });
+      bucket.insert({ name: "Carol", role: "user", deleted: true, verified: true });
+
+      const query = Query.or(
+        where("role", "admin"),
+        Query.and(where("verified", true), where("role", "user")),
+      ).nor(where("deleted", true));
+
+      const results = bucket.all(query) as Array<{ name: string }>;
+      expect(results.map((doc) => doc.name)).toEqual(["Alice", "Bob"]);
+      bucket.close();
+    });
+
+    test("projection pick returns selected fields", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Ada", email: "ada@example.com", secret: "hidden" });
+      const doc = bucket.get(
+        { name: "Ada" },
+        { projection: { pick: ["name", "email"] } },
+      );
+      expect(doc?.name).toBe("Ada");
+      expect(doc?.email).toBe("ada@example.com");
+      expect(doc?.secret).toBeUndefined();
+      bucket.close();
+    });
+  });
+
+  describe("indexes", () => {
+    test("ensureIndex, listIndexes, and dropIndex", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice" });
+      bucket.ensureIndex("name", { unique: false, sparse: true, reverse: false });
+      expect(bucket.indexes.name).toMatchObject({
+        name: "name",
+        unique: false,
+        sparse: true,
+        reverse: false,
+      });
+      expect(bucket.dropIndex("name")).toBe(true);
+      expect(bucket.indexes.name).toBeUndefined();
+      bucket.close();
+    });
+  });
+
+  describe("transfigurate", () => {
+    test("applies a single native update stage", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "stark", age: 40, marriage: "catelyn" });
+      bucket.insert({ name: "lannister", age: 35 });
+
+      const updated = bucket.transfigurate({ name: "stark" }, {
+        $set: { age: { $plus: ["$.age", 1] }, state: "dead" },
+        $unset: "marriage",
+      });
+      expect(updated).toBe(1);
+
+      const stark = bucket.get<{ age: number; state: string; marriage?: string }>({
+        name: "stark",
+      });
+      expect(stark?.age).toBe(41);
+      expect(stark?.state).toBe("dead");
+      expect(stark?.marriage).toBeUndefined();
+      bucket.close();
+    });
+
+    test("applies a pipeline of stages", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ first: "Arya", last: "Stark" });
+      const updated = bucket.transfigurate(undefined, [
+        { $set: { fullName: { $concat: ["$.first", " ", "$.last"] } } },
+        { $unset: ["first", "last"] },
+      ]);
+      expect(updated).toBe(1);
+      const doc = bucket.get<{ fullName: string; first?: string; last?: string }>({});
+      expect(doc?.fullName).toBe("Arya Stark");
+      expect(doc?.first).toBeUndefined();
+      expect(doc?.last).toBeUndefined();
+      bucket.close();
+    });
+  });
+
+  describe("transactions", () => {
+    test("Bucket.tx commits inserts, updates, and deletes together", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice", count: 1 });
+      bucket.insert({ name: "Bob", count: 2 });
+
+      const result = bucket.tx((tx) => {
+        tx.insert({ name: "Charlie", count: 3 });
+        tx.update({ name: "Alice" }, (doc: any) => ({ ...doc, name: "Doofus" }));
+        tx.delete({ name: "Bob" });
+        return "committed";
+      });
+
+      expect(result).toBe("committed");
+      const results = bucket.all() as Array<{ name: string }>;
+      expect(results).toHaveLength(2);
+      expect(results.map((doc) => doc.name).sort()).toEqual(["Charlie", "Doofus"]);
+      bucket.close();
+    });
+
+    test("Bucket.tx rolls back if the callback throws", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice", count: 1 });
+      bucket.insert({ name: "Bob", count: 2 });
+
+      expect(() =>
+        bucket.tx((tx) => {
+          tx.insert({ name: "Charlie", count: 3 });
+          tx.delete({ name: "Bob" });
+          throw new Error("boom");
+        }),
+      ).toThrow("boom");
+
+      const results = bucket.all() as Array<{ name: string }>;
+      expect(results.map((doc) => doc.name).sort()).toEqual(["Alice", "Bob"]);
+      bucket.close();
+    });
+
+    test("Transaction.transfigurate rolls back with the transaction", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "stark", age: 40 });
+
+      expect(() =>
+        bucket.tx((tx) => {
+          expect(
+            tx.transfigurate({ name: "stark" }, { $set: { age: 99 } }),
+          ).toBe(1);
+          throw new Error("rollback please");
+        }),
+      ).toThrow("rollback please");
+
+      expect(bucket.get<{ age: number }>({ name: "stark" })?.age).toBe(40);
+      bucket.close();
+    });
+  });
+
+  describe("maintenance", () => {
+    test("checkpoint and flush do not throw", () => {
+      const bucket = Bucket.open(":memory:");
+      bucket.insert({ name: "Alice" });
+      expect(() => bucket.checkpoint()).not.toThrow();
+      expect(() => bucket.flush()).not.toThrow();
+      bucket.close();
+    });
+
+    test("open accepts bucket options", () => {
+      const bucket = Bucket.open(":memory:", {
+        wal: false,
+        auto_vaccuum: true,
+        write_durability: "manual",
+      });
+      bucket.insert({ name: "Ada" });
+      expect(bucket.get({ name: "Ada" })?.name).toBe("Ada");
       bucket.close();
     });
   });
