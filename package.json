@@ -1,6 +1,6 @@
 {
   "name": "albedo-wasm",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "WASM bindings for Albedo document store",
   "type": "module",
   "main": "./dist/index.js",
