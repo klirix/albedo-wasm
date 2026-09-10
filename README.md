@@ -108,6 +108,19 @@ console.log("Rendered notes", latest);
 
 The module uses top-level `await`, so make sure your bundler targets environments that support it (all evergreen browsers and ESM-only Node.js/Bun entry points do).
 
+### Origin Private File System
+
+In a dedicated Worker, import `albedo-wasm/opfs`. `Bucket.open` is async and prepares OPFS access handles for you:
+
+```ts
+import { Bucket } from "albedo-wasm/opfs";
+import wasmUrl from "albedo-wasm/albedo.wasm?url";
+
+const bucket = await Bucket.open("notes.bucket", { wasmUrl });
+```
+
+See `examples/browser-opfs` for a React todo app and Bun.WebView CRUD tests.
+
 ## Query & index basics
 
 Albedo reuses familiar document-store concepts:

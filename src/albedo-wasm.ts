@@ -14,17 +14,17 @@ export * from "./query";
 const wasmUrl = new URL("./albedo.wasm", import.meta.url);
 
 async function loadWasmBytes(url: URL | string): Promise<ArrayBuffer> {
-  if (typeof Bun !== "undefined" && typeof Bun.file === "function") {
-    return Bun.file(wasmUrl).arrayBuffer();
-  }
-  if (isBrowserEnvironment() && typeof fetch === "function") {
+  if (typeof fetch === "function") {
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch WASM module (${response.status})`);
     }
     return response.arrayBuffer();
   }
-  const fs = await import("fs/promises");
+  if (typeof Bun !== "undefined" && typeof Bun.file === "function") {
+    return Bun.file(url).arrayBuffer();
+  }
+  const fs = await import(/* @vite-ignore */ "fs/promises");
   const buffer = await fs.readFile(url);
   return buffer.buffer.slice(
     buffer.byteOffset,
@@ -39,18 +39,27 @@ function isBrowserEnvironment(): boolean {
 type EnvHelpers = NodeEnvHelpers & BrowserEnvHelpers;
 type EnvImports = NodeEnvImports | BrowserEnvImports;
 
-async function resolveEnvImports(helpers: EnvHelpers): Promise<EnvImports> {
-  console.log(
-    isBrowserEnvironment() ? "Browser environment" : "Node.js environment",
-  );
+function isDedicatedWorker(): boolean {
+  return typeof (globalThis as { importScripts?: unknown }).importScripts ===
+    "function";
+}
+
+async function resolveEnvImports(helpers: EnvHelpers): Promise<EnvImports | null> {
   if (isBrowserEnvironment()) {
+    console.log("Browser environment");
     return import("./browser-imports").then(({ createBrowserEnvImports }) => {
       return createBrowserEnvImports(helpers);
     });
   }
-  return import("./node-imports").then(({ createNodeEnvImports }) => {
-    return createNodeEnvImports(helpers);
-  });
+  if (isDedicatedWorker()) {
+    return null;
+  }
+  console.log("Node.js environment");
+  return import(/* @vite-ignore */ "./node-imports").then(
+    ({ createNodeEnvImports }) => {
+      return createNodeEnvImports(helpers);
+    },
+  );
 }
 
 let wasmModule;
@@ -314,10 +323,25 @@ const envHelpers: EnvHelpers = {
 
 const envImports = await resolveEnvImports(envHelpers);
 
+export function getWasmEnvHelpers(): EnvHelpers {
+  return envHelpers;
+}
+
+export function isWasmReady(): boolean {
+  return wasmInstance !== null;
+}
+
 export async function compileWasmModule(
   url?: string | URL,
+  env?: WebAssembly.ModuleImports,
 ): Promise<WebAssembly.Module> {
   url = url || wasmUrl;
+  const resolvedEnv = (env ?? envImports) as WebAssembly.ModuleImports | null;
+  if (!resolvedEnv) {
+    throw new Error(
+      "Albedo WASM environment imports are not ready. Pass custom env imports (for example OPFS) to compileWasmModule().",
+    );
+  }
   if (
     typeof WebAssembly.compileStreaming === "function" &&
     typeof fetch === "function"
@@ -325,7 +349,7 @@ export async function compileWasmModule(
     try {
       wasmModule = await WebAssembly.compileStreaming(fetch(url));
       wasmInstance = await WebAssembly.instantiate(wasmModule, {
-        env: envImports,
+        env: resolvedEnv,
       });
       return wasmModule;
     } catch (err) {
@@ -336,11 +360,13 @@ export async function compileWasmModule(
   }
   const bytes = await loadWasmBytes(url);
   wasmModule = await WebAssembly.compile(bytes);
-  wasmInstance = await WebAssembly.instantiate(wasmModule, { env: envImports });
+  wasmInstance = await WebAssembly.instantiate(wasmModule, {
+    env: resolvedEnv,
+  });
   return wasmModule;
 }
 
-if (!isBrowserEnvironment()) {
+if (!isBrowserEnvironment() && !isDedicatedWorker()) {
   wasmModule = await compileWasmModule(wasmUrl);
 }
 

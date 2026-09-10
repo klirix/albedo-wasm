@@ -1,0 +1,113 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: #f4efe6;
+  color: #1f1b16;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  color: #7a6450;
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 2.4rem;
+}
+
+.lede {
+  margin: 0 0 1.5rem;
+  color: #5c4d40;
+}
+
+.composer,
+.edit {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+input {
+  flex: 1;
+  border: 1px solid #d3c4b4;
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  background: white;
+}
+
+button {
+  font: inherit;
+  border: 0;
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.95rem;
+  background: #1f1b16;
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.6rem;
+  align-items: center;
+  background: white;
+  border-radius: 0.8rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.item.done .title {
+  text-decoration: line-through;
+  color: #8a7b6d;
+}
+
+.title {
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0.2rem 0;
+}
+
+.edit-btn,
+.danger {
+  background: #eee6dc;
+  color: #1f1b16;
+}
+
+.danger {
+  color: #9b2c2c;
+}
+
+.empty {
+  color: #7a6450;
+}
